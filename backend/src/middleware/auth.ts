@@ -14,14 +14,10 @@ export const protectRoute = [
     try {
       const { userId: clerkId } = getAuth(req); //userId is what Claude stores
 
-      // if the userId is invalid, return unauthorized
-      if (!clerkId)
-        return res
-          .status(401)
-          .json({ message: "Unauthorized - invalid token" });
+      // Since we call requireAuth() this if check is not necessary
+      // if (!clerkId) return res.status(401).json({ message: "Unauthorized - invalid token" });
 
-      //   This part checks if the user is in the database
-      // if the userId is valid, find the user
+      // if the userId is valid, find the user (This part checks if the user is in the database)
       const user = await User.findOne({ clerkId });
 
       // User not found
@@ -31,8 +27,8 @@ export const protectRoute = [
 
       next();
     } catch (error) {
-      console.error("Error in protectRoute middleware", error);
-      res.status(500).json({ message: "Internal server error" });
+      res.status(500);
+      next(error);
     }
   },
 ];
