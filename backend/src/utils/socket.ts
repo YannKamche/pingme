@@ -5,10 +5,6 @@ import { Message } from "../models/Message";
 import { Chat } from "../models/Chat";
 import { User } from "../models/User";
 
-interface SocketWithUserId extends Socket {
-  userId: string;
-}
-
 // store online users in memory: userId -> socketId
 export const onlineUsers: Map<string, string> = new Map();
 
@@ -16,8 +12,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
   const allowedOrigins = [
     "http://localhost:8081", // Expo mobile
     "http://localhost:5173", // Vite web dev
-    process.env.FRONTEND_URL! as string, // production
-  ];
+    process.env.FRONTEND_URL, // production
+  ].filter(Boolean) as string[];
   const io = new SocketServer(httpServer, { cors: { origin: allowedOrigins } });
 
   // Verify socket connection - if the user is authenticated, we will store the user id in the socket
@@ -41,7 +37,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
 
       if (!user) return next(new Error("User not found")); // Return "User not found" if the user is not in the database
 
-      (socket as SocketWithUserId).userId = user._id.toString();
+      socket.data.userId = user._id.toString();
 
       next();
     } catch (error: any) {
@@ -53,7 +49,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
   // This "connection" event name is special and should be written like this
   // It's the event that is triggered when a new client connects to the server
   io.on("connection", (socket) => {
-    const userId = (socket as SocketWithUserId).userId;
+    const userId = socket.data.userId;
 
     // send list of all currently online users to the newly connected client
     socket.emit("online-users", {
@@ -72,6 +68,24 @@ export const initializeSocket = (httpServer: HttpServer) => {
     // Listen for join chats
     socket.on("join-chat", (chatId: string) => {
       socket.join(`chat:${chatId}`);
+
+      // Authorize before joining the chat
+
+      socket.on("join-chat", async (chatId: string) => {
+        try {
+          const allowed = await Chat.exists({
+            _id: chatId,
+            participants: userId,
+          });
+          if (!allowed) {
+            socket.emit("socket-error", { message: "Unauthorized " });
+            return;
+          }
+          socket.join(`chat:${chatId}`);
+        } catch {
+          socket.emit("socket-error", { message: "Failed to join chat" });
+        }
+      });
     });
 
     // Listen for leave chats
@@ -112,7 +126,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
           await chat.save();
 
           // populate the sender
-          await message.populate("sender", "name email avatar");
+          await message.populate("sender", "name avatar");
 
           // emit to chat room (for users inside the chat)
           io.to(`chat:${chatId}`).emit("new-message", message);
